@@ -1,4 +1,4 @@
- Horloge connectée avec Raspberry Pi Pico W et Servo Moteur
+# **Horloge connectée avec Raspberry Pi Pico W et Servo Moteur**#
 Description du projet
 
 Ce projet consiste à créer une horloge connectée utilisant un Raspberry Pi Pico W et un servo moteur.
