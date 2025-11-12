@@ -1,0 +1,98 @@
+import network      # Gestion du Wi-Fi
+import ntptime      # Synchronisation NTP
+import time         # Gestion du temps
+from machine import Pin, PWM  # Contrôle des GPIO et PWM
+
+# Connexion Wi-Fi
+ssid = 'iPhone de Martin'      # SSID du réseau
+password = '...'        # Mot de passe Wi-Fi
+
+wlan = network.WLAN(network.STA_IF)  # Mode station
+wlan.active(True)                    # Active le Wi-Fi
+wlan.connect(ssid, password)         # Connexion au réseau
+
+while not wlan.isconnected():        # Attente de la connexion
+    print("Connexion Wi-Fi...")
+    time.sleep(1)
+
+print("Connecté !")                  # Confirmation
+
+# Synchronisation NTP
+try:
+    ntptime.settime()                # Met à jour l'heure interne
+    print("Heure synchronisée via NTP.")
+except:
+    print("Erreur NTP, utilisation de l'heure interne.")  # Si NTP échoue
+
+# Configuration du bouton
+button = Pin(18, Pin.IN, Pin.PULL_UP)  # Bouton en entrée avec pull-up
+last_state = 1                         # État précédent
+click_time = 0                         # Temps du clic
+click_pending = False                  # Indicateur clic en attente
+last_boucle = 0                        # Dernier tick pour anti-rebond
+
+# Paramètres
+timezones = [0, 1, -5]                 # Liste des fuseaux horaires
+tz_index = 0                           # Index du fuseau courant
+mode_24h = False                       # False = 12h, True = 24h
+
+# Servo
+servo = PWM(Pin(20))                   # Servo sur GPIO 20
+servo.freq(50)                         # Fréquence standard servo
+
+def set_servo_angle(angle):
+    # Convertit un angle (0-180°) en signal PWM pour le servo
+    duty = int(1638 + (angle / 180) * (8192 - 1638))  
+    servo.duty_u16(duty)                              
+
+# Boucle principale
+try:
+    while True:
+        current_state = button.value()                # Lecture bouton
+
+        if time.ticks_ms() - last_boucle > 50:        # Anti-rebond (50 ms)
+            now = time.ticks_ms()
+
+            # Détection clic
+            if last_state == 1 and current_state == 0:  # Front descendant
+                if click_pending and (now - click_time < 400):  # Double-clic
+                    mode_24h = not mode_24h                     # Change mode
+                    print("Mode changé :", "24h" if mode_24h else "12h")
+                    click_pending = False
+                else:                                           # Premier clic
+                    click_pending = True
+                    click_time = now
+
+            # Si clic en attente et délai écoulé → simple clic
+            if click_pending and (now - click_time >= 400):
+                tz_index = (tz_index + 1) % len(timezones)      # Change fuseau
+                print(f"Fuseau horaire changé → UTC{timezones[tz_index]:+d}")
+                click_pending = False
+
+            last_state = current_state                          
+
+            # Application fuseau horaire
+            offset = timezones[tz_index]                       # Décalage UTC
+            t = time.time() + offset * 3600                    # Temps ajusté
+            year, month, day, hour, minute, second, _, _ = time.localtime(t)
+
+            print(f"Date : {day:02}/{month:02}/{year} | Heure locale (UTC{offset:+d}) : {hour:02}:{minute:02}:{second:02} | Mode : {'24h' if mode_24h else '12h'}")
+
+            # Calcul angle servo
+            if mode_24h:
+                total_minutes = hour * 60 + minute             # Minutes totales
+                angle = total_minutes * (180 / 1440)           
+            else:
+                hour_12 = hour % 12                            # Heure en 12h
+                angle = (hour_12 * 60 + minute) * (180 / 720) 
+
+            print(f"Angle servo : {angle:.1f}°")
+            set_servo_angle(angle)                             # Applique angle
+
+            last_boucle = time.ticks_ms()                      # Mise à jour tick
+
+except KeyboardInterrupt:
+    print("\nProgramme interrompu par Ctrl+C.")               # Arrêt propre
+    servo.deinit()                                             
+    wlan.active(False)                                         # Coupe Wi-Fi
+    
